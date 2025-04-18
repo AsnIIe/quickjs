@@ -29,11 +29,35 @@
 #include <string.h>
 #include <inttypes.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#include <intrin.h>
+#ifndef alloca
+#define alloca(s) _alloca(s)
+#endif
+#else 
+#include <sys/time.h>
+#endif
+
+ /* set if CPU is big endian */
+#undef WORDS_BIGENDIAN
+
+#if !defined(__has_attribute) || defined(_WIN32)
+#define likely(x)    (x)
+#define unlikely(x)  (x)
+#define force_inline __forceinline
+#define no_inline __declspec(noinline)
+#define __maybe_unused
+#define __attribute__(x)
+#define __attribute(x)
+typedef intptr_t ssize_t;
+#else
 #define likely(x)       __builtin_expect(!!(x), 1)
 #define unlikely(x)     __builtin_expect(!!(x), 0)
 #define force_inline inline __attribute__((always_inline))
 #define no_inline __attribute__((noinline))
 #define __maybe_unused __attribute__((unused))
+#endif //_WIN32
 
 #define xglue(x, y) x ## y
 #define glue(x, y) xglue(x, y)
@@ -64,6 +88,10 @@ enum {
     FALSE = 0,
     TRUE = 1,
 };
+#endif
+
+#if defined(_WIN32)
+int gettimeofday(struct timeval* tp, struct timezone* tzp);
 #endif
 
 void pstrcpy(char *buf, int buf_size, const char *str);
@@ -125,6 +153,74 @@ static inline int64_t min_int64(int64_t a, int64_t b)
         return b;
 }
 
+#if defined(_WIN32)
+/* WARNING: undefined if a = 0 */
+static inline int clz32(unsigned int a) {
+    unsigned long idx;
+    _BitScanReverse(&idx, a);
+    return 31 ^ idx;
+}
+
+/* WARNING: undefined if a = 0 */
+static inline int clz64(uint64_t a) {
+    unsigned long where;
+    // BitScanReverse scans from MSB to LSB for first set bit.
+    // Returns 0 if no set bit is found.
+#if INTPTR_MAX >= INT64_MAX // 64-bit
+    if (_BitScanReverse64(&where, a))
+        return (int)(63 - where);
+#else
+  // Scan the high 32 bits.
+    if (_BitScanReverse(&where, (uint32_t)(a >> 32)))
+        return (int)(63 - (where + 32)); // Create a bit offset from the MSB.
+      // Scan the low 32 bits.
+    if (_BitScanReverse(&where, (uint32_t)(a)))
+        return (int)(63 - where);
+#endif
+    return 64; // Undefined Behavior.
+}
+
+/* WARNING: undefined if a = 0 */
+static inline int ctz32(unsigned int a) {
+    unsigned long idx;
+    _BitScanForward(&idx, a);
+    return 31 ^ idx;
+}
+
+/* WARNING: undefined if a = 0 */
+static inline int ctz64(uint64_t a) {
+    unsigned long where;
+    // Search from LSB to MSB for first set bit.
+    // Returns zero if no set bit is found.
+#if INTPTR_MAX >= INT64_MAX // 64-bit
+    if (_BitScanForward64(&where, a))
+        return (int)(where);
+#else
+  // Win32 doesn't have _BitScanForward64 so emulate it with two 32 bit calls.
+  // Scan the Low Word.
+    if (_BitScanForward(&where, (uint32_t)(a)))
+        return (int)(where);
+    // Scan the High Word.
+    if (_BitScanForward(&where, (uint32_t)(a >> 32)))
+        return (int)(where + 32); // Create a bit offset from the LSB.
+#endif
+    return 64;
+}
+
+#pragma pack(push, 1)
+struct packed_u64 {
+    uint64_t v;
+};
+
+struct packed_u32 {
+    uint32_t v;
+};
+
+struct packed_u16 {
+    uint16_t v;
+};
+#pragma pack(pop)
+#else
 /* WARNING: undefined if a = 0 */
 static inline int clz32(unsigned int a)
 {
@@ -160,6 +256,7 @@ struct __attribute__((packed)) packed_u32 {
 struct __attribute__((packed)) packed_u16 {
     uint16_t v;
 };
+#endif //_WIN32
 
 static inline uint64_t get_u64(const uint8_t *tab)
 {

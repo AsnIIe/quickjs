@@ -29,6 +29,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#if !defined(CONFIG_VERSION)
+#define CONFIG_VERSION "2024-02-14"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
