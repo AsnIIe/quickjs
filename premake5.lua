@@ -62,13 +62,15 @@ project "libruntime"
 
 		"platform/x86/dirent.h",
 		"platform/x86/getopt.h",
-
+		
 		"cutils.c",
 		"libregexp.c",
 		"libunicode.c",
 		"quickjs.c",
 		"quickjs-libc.c",
-		"dtoa.c"
+		"dtoa.c",
+
+		"platform/x86/quickjs-export.def"
 	}
 -----------------------------------------------------------------------------------------------------------------------
 project "libquickjs"
@@ -110,7 +112,7 @@ project "examples"
 project "qjsc"
 	language "C"
 	kind "ConsoleApp"
-	links { "libruntime" }
+	links { "libquickjs" }
 	files {
 		"qjsc.c"
 	}
@@ -118,7 +120,7 @@ project "qjsc"
 project "qjs"
 	language "C"
 	kind "ConsoleApp"
-	links { "libruntime" }
+	links { "libquickjs" }
 	dependson { "qjsc" }
 	files {
 		"qjs.c",
