@@ -22,3 +22,9 @@ unicode
 unicode_gen
 run_octane
 run_sunspider_like
+
+/.vs
+/build/bin
+/libs
+/examples
+/build
