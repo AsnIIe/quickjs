@@ -38,6 +38,9 @@
 #elif defined(__FreeBSD__)
 #include <malloc_np.h>
 #endif
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 #include "cutils.h"
 #include "list.h"
@@ -1527,7 +1530,20 @@ static inline BOOL js_check_stack_overflow(JSRuntime *rt, size_t alloca_size)
 /* Note: OS and CPU dependent */
 static inline uintptr_t js_get_stack_pointer(void)
 {
+#if defined(__clang__) || defined(__GNUC__)
     return (uintptr_t)__builtin_frame_address(0);
+#elif defined(_MSC_VER)
+    return (uintptr_t)_AddressOfReturnAddress();
+#else
+    char CharOnStack = 0;
+    // The volatile store here is intended to escape the local variable, to
+    // prevent the compiler from optimizing CharOnStack into anything other
+    // than a char on the stack.
+    //
+    // Tested on: MSVC 2015 - 2019, GCC 4.9 - 9, Clang 3.2 - 9, ICC 13 - 19.
+    char* volatile Ptr = &CharOnStack;
+    return (uintptr_t)Ptr;
+#endif
 }
 
 static inline BOOL js_check_stack_overflow(JSRuntime *rt, size_t alloca_size)
