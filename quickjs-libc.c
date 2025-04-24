@@ -3906,6 +3906,10 @@ static JSValue js_print(JSContext *ctx, JSValueConst this_val,
         str = JS_ToCStringLen(ctx, &len, argv[i]);
         if (!str)
             return JS_EXCEPTION;
+#if defined(_WIN32)
+        if (GetConsoleOutputCP()!= CP_UTF8)
+            SetConsoleOutputCP(CP_UTF8);
+#endif
         fwrite(str, 1, len, stdout);
         JS_FreeCString(ctx, str);
     }
