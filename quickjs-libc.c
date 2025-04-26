@@ -105,6 +105,7 @@ typedef struct {
 typedef struct {
     struct list_head link;
     int timer_id;
+    int64_t interval;
     int64_t timeout;
     JSValue func;
 } JSOSTimer;
@@ -2047,20 +2048,13 @@ static void free_timer(JSRuntime *rt, JSOSTimer *th)
     js_free_rt(rt, th);
 }
 
-static JSValue js_os_setTimeout(JSContext *ctx, JSValueConst this_val,
-                                int argc, JSValueConst *argv)
+static JSValue js_os_create_timer(JSContext* ctx, int64_t interval,
+                                  int64_t delay, JSValueConst func)
 {
-    JSRuntime *rt = JS_GetRuntime(ctx);
-    JSThreadState *ts = JS_GetRuntimeOpaque(rt);
-    int64_t delay;
-    JSValueConst func;
-    JSOSTimer *th;
+    JSRuntime* rt = JS_GetRuntime(ctx);
+    JSThreadState* ts = JS_GetRuntimeOpaque(rt);
+    JSOSTimer* th;
 
-    func = argv[0];
-    if (!JS_IsFunction(ctx, func))
-        return JS_ThrowTypeError(ctx, "not a function");
-    if (JS_ToInt64(ctx, &delay, argv[1]))
-        return JS_EXCEPTION;
     th = js_mallocz(ctx, sizeof(*th));
     if (!th)
         return JS_EXCEPTION;
@@ -2069,10 +2063,41 @@ static JSValue js_os_setTimeout(JSContext *ctx, JSValueConst this_val,
         ts->next_timer_id = 1;
     else
         ts->next_timer_id++;
+    th->interval = interval;
     th->timeout = get_time_ms() + delay;
     th->func = JS_DupValue(ctx, func);
     list_add_tail(&th->link, &ts->os_timers);
     return JS_NewInt32(ctx, th->timer_id);
+}
+
+static JSValue js_os_setTimeout(JSContext* ctx, JSValueConst this_val,
+                                int argc, JSValueConst* argv) 
+{
+    int64_t delay;
+    JSValueConst func;
+
+    func = argv[0];
+    if (!JS_IsFunction(ctx, func))
+        return JS_ThrowTypeError(ctx, "not a function");
+    if (JS_ToInt64(ctx, &delay, argv[1]))
+        return JS_EXCEPTION;
+
+    return js_os_create_timer(ctx, 0, delay, func);
+}
+
+static JSValue js_os_setInterval(JSContext* ctx, JSValueConst this_val,
+                                 int argc, JSValueConst* argv) 
+{
+    int64_t delay;
+    JSValueConst func;
+
+    func = argv[0];
+    if (!JS_IsFunction(ctx, func))
+        return JS_ThrowTypeError(ctx, "not a function");
+    if (JS_ToInt64(ctx, &delay, argv[1]))
+        return JS_EXCEPTION;
+
+    return js_os_create_timer(ctx, delay, delay, func);
 }
 
 static JSOSTimer *find_timer_by_id(JSThreadState *ts, int timer_id)
@@ -2137,7 +2162,7 @@ static JSValue js_os_sleepAsync(JSContext *ctx, JSValueConst this_val,
     return promise;
 }
 
-static void call_handler(JSContext *ctx, JSValueConst func)
+static JS_BOOL call_handler(JSContext *ctx, JSValueConst func)
 {
     JSValue ret, func1;
     /* 'func' might be destroyed when calling itself (if it frees the
@@ -2147,7 +2172,11 @@ static void call_handler(JSContext *ctx, JSValueConst func)
     JS_FreeValue(ctx, func1);
     if (JS_IsException(ret))
         js_std_dump_error(ctx);
+    if (JS_IsException(ret)) {
+        return FALSE;
+    }
     JS_FreeValue(ctx, ret);
+    return TRUE;
 }
 
 #ifdef USE_WORKER
@@ -2298,7 +2327,7 @@ static int js_os_poll(JSContext *ctx)
 {
     JSRuntime *rt = JS_GetRuntime(ctx);
     JSThreadState *ts = JS_GetRuntimeOpaque(rt);
-    int min_delay, count;
+    int min_delay, count, err = 0;
     int64_t cur_time, delay;
     JSOSRWHandler *rh;
     struct list_head *el;
@@ -2321,11 +2350,22 @@ static int js_os_poll(JSContext *ctx)
                 JSValue func;
                 /* the timer expired */
                 func = th->func;
-                th->func = JS_UNDEFINED;
-                free_timer(rt, th);
-                call_handler(ctx, func);
-                JS_FreeValue(ctx, func);
-                return 0;
+                if (th->interval > 0) {
+                    th->timeout = cur_time + th->interval;
+                    if (!call_handler(ctx, func)) {
+                        err = -2;
+                        th->func = JS_UNDEFINED;
+                        free_timer(rt, th);
+                        JS_FreeValue(ctx, func);
+                    }
+                } else {
+                    th->func = JS_UNDEFINED;
+                    free_timer(rt, th);
+                    if (!call_handler(ctx, func))
+                        err = -2;
+                    JS_FreeValue(ctx, func);
+                }
+                return err;
             } else if (delay < min_delay) {
                 min_delay = delay;
             }
@@ -2363,7 +2403,8 @@ static int js_os_poll(JSContext *ctx)
             list_for_each(el, &ts->os_rw_handlers) {
                 rh = list_entry(el, JSOSRWHandler, link);
                 if (rh->fd == 0 && !JS_IsNull(rh->rw_func[0])) {
-                    call_handler(ctx, rh->rw_func[0]);
+                    if (!call_handler(ctx, rh->rw_func[0]))
+                        err = -2;
                     /* must stop because the list may have been modified */
                     goto done;
                 }
@@ -2384,7 +2425,7 @@ static int js_os_poll(JSContext *ctx)
         Sleep(min_delay);
     }
  done:
-    return 0;
+    return err;
 }
 
 #else
@@ -3804,6 +3845,8 @@ static const JSCFunctionListEntry js_os_funcs[] = {
     JS_CFUNC_DEF("now", 0, js_os_now ),
     JS_CFUNC_DEF("setTimeout", 2, js_os_setTimeout ),
     JS_CFUNC_DEF("clearTimeout", 1, js_os_clearTimeout ),
+    JS_CFUNC_DEF("setInterval", 2, js_os_setInterval ),
+    JS_CFUNC_DEF("clearInterval", 1, js_os_clearTimeout ),
     JS_CFUNC_DEF("sleepAsync", 1, js_os_sleepAsync ),
     JS_PROP_STRING_DEF("platform", OS_PLATFORM, 0 ),
     JS_CFUNC_DEF("getcwd", 0, js_os_getcwd ),
@@ -3844,7 +3887,8 @@ static const JSCFunctionListEntry js_os_funcs[] = {
 
 static int js_os_init(JSContext *ctx, JSModuleDef *m)
 {
-    os_poll_func = js_os_poll;
+    if (!os_poll_func) 
+        os_poll_func = js_os_poll;
 
 #ifdef USE_WORKER
     {
@@ -3958,11 +4002,23 @@ void js_std_add_helpers(JSContext *ctx, int argc, char **argv)
     JS_SetPropertyStr(ctx, global_obj, "__loadScript",
                       JS_NewCFunction(ctx, js_loadScript, "__loadScript", 1));
 
+    JS_SetPropertyStr(ctx, global_obj, "setTimeout",
+                      JS_NewCFunction(ctx, js_os_setTimeout, "setTimeout", 2));
+    JS_SetPropertyStr(ctx, global_obj, "setInterval",
+                      JS_NewCFunction(ctx, js_os_setInterval, "setInterval", 2));
+    JS_SetPropertyStr(ctx, global_obj, "clearTimeout",
+                      JS_NewCFunction(ctx, js_os_clearTimeout, "clearTimeout", 1));
+    JS_SetPropertyStr(ctx, global_obj, "clearInterval",
+                      JS_NewCFunction(ctx, js_os_clearTimeout, "clearInterval", 1));
+
     JS_FreeValue(ctx, global_obj);
 }
 
 void js_std_init_handlers(JSRuntime *rt)
 {
+    if (!os_poll_func)
+        os_poll_func = js_os_poll;
+
     JSThreadState *ts;
 
     ts = malloc(sizeof(*ts));
