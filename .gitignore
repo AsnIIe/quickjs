@@ -32,6 +32,5 @@ run_sunspider_like
 /.vs
 /build/bin
 /libs
-/examples
 /build
 libwinpthread*.dll
