@@ -108,6 +108,9 @@ typedef struct {
     int64_t interval;
     int64_t timeout;
     JSValue func;
+    JSValue this_val;
+    int argc;
+    JSValue* argv;
 } JSOSTimer;
 
 typedef struct {
@@ -2045,6 +2048,9 @@ static void free_timer(JSRuntime *rt, JSOSTimer *th)
 {
     list_del(&th->link);
     JS_FreeValueRT(rt, th->func);
+    JS_FreeValueRT(rt, th->this_val);
+    for (size_t i = 0; i < th->argc; i++)
+        JS_FreeValueRT(rt, th->argv[i]);
     js_free_rt(rt, th);
 }
 
@@ -2066,6 +2072,8 @@ static JSValue js_os_create_timer(JSContext* ctx, int64_t interval,
     th->interval = interval;
     th->timeout = get_time_ms() + delay;
     th->func = JS_DupValue(ctx, func);
+    th->this_val = JS_UNDEFINED;
+    th->argc = 0;
     list_add_tail(&th->link, &ts->os_timers);
     return JS_NewInt32(ctx, th->timer_id);
 }
@@ -2162,13 +2170,14 @@ static JSValue js_os_sleepAsync(JSContext *ctx, JSValueConst this_val,
     return promise;
 }
 
-static JS_BOOL call_handler(JSContext *ctx, JSValueConst func)
+static JS_BOOL call_handler(JSContext *ctx, JSValueConst func, JSValueConst this_val,
+                            int argc, JSValueConst* argv)
 {
     JSValue ret, func1;
     /* 'func' might be destroyed when calling itself (if it frees the
        handler), so must take extra care */
     func1 = JS_DupValue(ctx, func);
-    ret = JS_Call(ctx, func1, JS_UNDEFINED, 0, NULL);
+    ret = JS_Call(ctx, func1, this_val, argc, argv);
     JS_FreeValue(ctx, func1);
     if (JS_IsException(ret))
         js_std_dump_error(ctx);
@@ -2347,23 +2356,17 @@ static int js_os_poll(JSContext *ctx)
             JSOSTimer *th = list_entry(el, JSOSTimer, link);
             delay = th->timeout - cur_time;
             if (delay <= 0) {
-                JSValue func;
                 /* the timer expired */
-                func = th->func;
                 if (th->interval > 0) {
                     th->timeout = cur_time + th->interval;
-                    if (!call_handler(ctx, func)) {
+                    if (!call_handler(ctx, th->func, th->this_val, th->argc, th->argv)) {
                         err = -2;
-                        th->func = JS_UNDEFINED;
                         free_timer(rt, th);
-                        JS_FreeValue(ctx, func);
                     }
                 } else {
-                    th->func = JS_UNDEFINED;
-                    free_timer(rt, th);
-                    if (!call_handler(ctx, func))
+                    if (!call_handler(ctx, th->func, th->this_val, th->argc, th->argv))
                         err = -2;
-                    JS_FreeValue(ctx, func);
+                    free_timer(rt, th);
                 }
                 return err;
             } else if (delay < min_delay) {
@@ -2403,7 +2406,7 @@ static int js_os_poll(JSContext *ctx)
             list_for_each(el, &ts->os_rw_handlers) {
                 rh = list_entry(el, JSOSRWHandler, link);
                 if (rh->fd == 0 && !JS_IsNull(rh->rw_func[0])) {
-                    if (!call_handler(ctx, rh->rw_func[0]))
+                    if (!call_handler(ctx, rh->rw_func[0], JS_UNDEFINED, 0, NULL))
                         err = -2;
                     /* must stop because the list may have been modified */
                     goto done;
@@ -4184,6 +4187,47 @@ JSValue js_std_await(JSContext *ctx, JSValue obj)
         }
     }
     return ret;
+}
+
+BOOL js_std_set_timer(JSContext* ctx, JSValue job_func, JSValueConst this_val,
+                     int argc, JSValueConst* argv, int64_t delay) 
+{
+    argc = argv ? argc : 0;
+
+    if (!JS_IsFunction(ctx, job_func))
+        return FALSE;
+
+    JSRuntime* rt = JS_GetRuntime(ctx);
+    JSThreadState* ts = JS_GetRuntimeOpaque(rt);
+    JSOSTimer* th;
+
+    th = js_mallocz(ctx, sizeof(*th) + argc * sizeof(JSValue));
+    if (!th) {
+        return FALSE;
+    }
+    th->interval = 0;
+    th->timeout = get_time_ms() + (delay >= 0 ? delay : 0);
+    th->func = JS_DupValue(ctx, job_func);
+    th->this_val = JS_DupValue(ctx, this_val);
+    th->argc = argc;
+    for (size_t i = 0; i < argc; i++) {
+        th->argv[i] = JS_DupValue(ctx, argv[i]);
+    }
+    list_add_tail(&th->link, &ts->os_timers);
+    return TRUE;
+}
+
+/* execute pending timer jobs,
+   return < 0 if exception, 0 if no job pending, 1 if a job was
+   executed successfully. */
+int js_std_await_timer(JSContext* ctx)
+{
+    int err;
+    if (os_poll_func)
+        err = os_poll_func(ctx);
+    else
+        return -3;
+    return err + 1;
 }
 
 void js_std_eval_binary(JSContext *ctx, const uint8_t *buf, size_t buf_len,
