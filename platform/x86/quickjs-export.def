@@ -109,6 +109,9 @@ JS_NewTypedArray
 JS_ParseJSON
 JS_ParseJSON2
 JS_PreventExtensions
+JS_PrintValue
+JS_PrintValueRT
+JS_PrintValueSetDefaultOptions
 JS_ReadObject
 JS_ResolveModule
 JS_RunGC
