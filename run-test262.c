@@ -372,26 +372,39 @@ static void enumerate_tests(const char *path)
           namelist_cmp_indirect);
 }
 
+static void js_print_value_write(void *opaque, const char *buf, size_t len)
+{
+    FILE *fo = opaque;
+    fwrite(buf, 1, len, fo);
+}
+
 static JSValue js_print(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     int i;
-    const char *str;
-
+    JSValueConst v;
+    
     if (outfile) {
         for (i = 0; i < argc; i++) {
             if (i != 0)
                 fputc(' ', outfile);
-            str = JS_ToCString(ctx, argv[i]);
-            if (!str)
-                return JS_EXCEPTION;
-            if (!strcmp(str, "Test262:AsyncTestComplete")) {
-                async_done++;
-            } else if (strstart(str, "Test262:AsyncTestFailure", NULL)) {
-                async_done = 2; /* force an error */
+            v = argv[i];
+            if (JS_IsString(v)) {
+                const char *str;
+                size_t len;
+                str = JS_ToCStringLen(ctx, &len, v);
+                if (!str)
+                    return JS_EXCEPTION;
+                if (!strcmp(str, "Test262:AsyncTestComplete")) {
+                    async_done++;
+                } else if (strstart(str, "Test262:AsyncTestFailure", NULL)) {
+                    async_done = 2; /* force an error */
+                }
+                fwrite(str, 1, len, outfile);
+                JS_FreeCString(ctx, str);
+            } else {
+                JS_PrintValue(ctx, js_print_value_write, outfile, v, NULL);
             }
-            fputs(str, outfile);
-            JS_FreeCString(ctx, str);
         }
         fputc('\n', outfile);
     }

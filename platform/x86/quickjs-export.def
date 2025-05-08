@@ -110,7 +110,6 @@ JS_ParseJSON
 JS_ParseJSON2
 JS_PreventExtensions
 JS_ReadObject
-JS_ResetUncatchableError
 JS_ResolveModule
 JS_RunGC
 JS_SameValue
@@ -140,7 +139,7 @@ JS_SetRuntimeInfo
 JS_SetRuntimeOpaque
 JS_SetStripInfo
 JS_SetSharedArrayBufferFunctions
-JS_SetUncatchableError
+JS_SetUncatchableException
 JS_StrictEq
 JS_Throw
 JS_ThrowInternalError

@@ -170,6 +170,7 @@ static BOOL my_isdigit(int c)
     return (c >= '0' && c <= '9');
 }
 
+/* XXX: use 'o' and 'O' for object using JS_PrintValue() ? */
 static JSValue js_printf_internal(JSContext *ctx,
                                   int argc, JSValueConst *argv, FILE *fp)
 {
@@ -934,7 +935,7 @@ static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
         /* convert the uncatchable "interrupted" error into a normal error
            so that it can be caught by the REPL */
         if (JS_IsException(ret))
-            JS_ResetUncatchableError(ctx);
+            JS_SetUncatchableException(ctx, FALSE);
     }
     return ret;
 }
@@ -1211,6 +1212,19 @@ static JSValue js_std_file_printf(JSContext *ctx, JSValueConst this_val,
     if (!f)
         return JS_EXCEPTION;
     return js_printf_internal(ctx, argc, argv, f);
+}
+
+static void js_print_value_write(void *opaque, const char *buf, size_t len)
+{
+    FILE *fo = opaque;
+    fwrite(buf, 1, len, fo);
+}
+
+static JSValue js_std_file_printObject(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv)
+{
+    JS_PrintValue(ctx, js_print_value_write, stdout, argv[0], NULL);
+    return JS_UNDEFINED;
 }
 
 static JSValue js_std_file_flush(JSContext *ctx, JSValueConst this_val,
@@ -1670,6 +1684,7 @@ static const JSCFunctionListEntry js_std_funcs[] = {
     JS_PROP_INT32_DEF("SEEK_CUR", SEEK_CUR, JS_PROP_CONFIGURABLE ),
     JS_PROP_INT32_DEF("SEEK_END", SEEK_END, JS_PROP_CONFIGURABLE ),
     JS_OBJECT_DEF("Error", js_std_error_props, countof(js_std_error_props), JS_PROP_CONFIGURABLE),
+    JS_CFUNC_DEF("__printObject", 1, js_std_file_printObject ),
 };
 
 static const JSCFunctionListEntry js_std_file_proto_funcs[] = {
@@ -4064,21 +4079,26 @@ static JSValue js_print(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     int i;
-    const char *str;
-    size_t len;
-
+    JSValueConst v;
+#if defined(_WIN32)
+    if (GetConsoleOutputCP() != CP_UTF8)
+        SetConsoleOutputCP(CP_UTF8);
+#endif
     for(i = 0; i < argc; i++) {
         if (i != 0)
             putchar(' ');
-        str = JS_ToCStringLen(ctx, &len, argv[i]);
-        if (!str)
-            return JS_EXCEPTION;
-#if defined(_WIN32)
-        if (GetConsoleOutputCP()!= CP_UTF8)
-            SetConsoleOutputCP(CP_UTF8);
-#endif
-        fwrite(str, 1, len, stdout);
-        JS_FreeCString(ctx, str);
+        v = argv[i];
+        if (JS_IsString(v)) {
+            const char *str;
+            size_t len;
+            str = JS_ToCStringLen(ctx, &len, v);
+            if (!str)
+                return JS_EXCEPTION;
+            fwrite(str, 1, len, stdout);
+            JS_FreeCString(ctx, str);
+        } else {
+            JS_PrintValue(ctx, js_print_value_write, stdout, v, NULL);
+        }
     }
     putchar('\n');
     return JS_UNDEFINED;
@@ -4201,33 +4221,10 @@ void js_std_free_handlers(JSRuntime *rt)
     JS_SetRuntimeOpaque(rt, NULL); /* fail safe */
 }
 
-static void js_dump_obj(JSContext *ctx, FILE *f, JSValueConst val)
-{
-    const char *str;
-
-    str = JS_ToCString(ctx, val);
-    if (str) {
-        fprintf(f, "%s\n", str);
-        JS_FreeCString(ctx, str);
-    } else {
-        fprintf(f, "[exception]\n");
-    }
-}
-
 static void js_std_dump_error1(JSContext *ctx, JSValueConst exception_val)
 {
-    JSValue val;
-    BOOL is_error;
-
-    is_error = JS_IsError(ctx, exception_val);
-    js_dump_obj(ctx, stderr, exception_val);
-    if (is_error) {
-        val = JS_GetPropertyStr(ctx, exception_val, "stack");
-        if (!JS_IsUndefined(val)) {
-            js_dump_obj(ctx, stderr, val);
-        }
-        JS_FreeValue(ctx, val);
-    }
+    JS_PrintValue(ctx, js_print_value_write, stderr, exception_val, NULL);
+    fputc('\n', stderr);
 }
 
 void js_std_dump_error(JSContext *ctx)
@@ -4298,8 +4295,10 @@ JSValue js_std_await(JSContext *ctx, JSValue obj)
             if (err < 0) {
                 js_std_dump_error(ctx1);
             }
-            if (os_poll_func)
-                os_poll_func(ctx);
+            if (err == 0) {
+                if (os_poll_func)
+                    os_poll_func(ctx);
+            }
         } else {
             /* not a promise */
             ret = obj;
