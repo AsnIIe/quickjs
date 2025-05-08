@@ -483,11 +483,131 @@ typedef JSModuleDef *(JSInitModuleFunc)(JSContext *ctx,
 
 
 #if defined(_WIN32)
-static JSModuleDef *js_module_loader_so(JSContext *ctx,
-                                        const char *module_name)
-{
+static inline char* dynamic_strreplece(char* buf, char c, char x) {
+    size_t strlen = 0;
+    while (*buf) {
+        if (*buf == c) {
+            *buf = x;
+        }
+        buf++;
+        strlen++;
+    }
+    buf -= strlen;
+    return buf;
+}
+
+static inline int dynamic_strrchr(const char* s, char c) {
+    size_t size = strlen(s);
+    for (int i = size - 1; i >= 0; i--) {
+        if (s[i] == c) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static inline int dynamic_strchr(const char* s, char c) {
+    size_t size = strlen(s);
+    for (size_t i = 0; i < size; i++) {
+        if (s[i] == c) {
+            return i;
+        }
+    }
+    return size;
+}
+
+static char* dynamic_resolve(const char* origin, const char* library, char* dest, char* method) {
+    if (!strstart(origin, "..", NULL)
+        && !strstart(origin, ".", NULL)
+        && !strchr(origin, ':')) {
+        if (library) {
+            strcpy(dest, library);
+        } else {
+            strcpy(dest, ".\\");
+        }
+        strcat(dest, origin);
+    } else {
+        strcpy(dest, origin);
+    }
+    dynamic_strreplece(dest, '/', '\\');
+    if (!has_suffix(dest, ".dll")) {
+        strcat(dest, ".dll");
+    }
+
+    {
+        strcpy(method, "js_init_");
+
+        int sIdx = 0, eIdx = 0, size = 0;
+        sIdx = dynamic_strrchr(dest, '\\');
+        eIdx = dynamic_strrchr(dest, '.');
+        size = eIdx - sIdx - 1;
+        memcpy(method + 8, dest + sIdx + 1, size);
+
+        dynamic_strreplece(method, '.', '_');
+    }
+
+    int sIdx1 = dynamic_strrchr(dest, '\\');
+    int sIdx2 = dynamic_strchr(dest + sIdx1, '.');
+    dest[sIdx1 + sIdx2] = '\0';
+    strcat(dest, ".dll");
+
+    return dest;
+}
+
+static inline char* dynamic_u82a(const char* content, char* dst) {
+    int len = 0;
+    unsigned short* ansi = NULL;
+
+    len = MultiByteToWideChar(CP_UTF8, 0, content, -1, NULL, 0);
+    ansi = (unsigned short*)malloc(sizeof(unsigned short) * len);
+    if (!ansi)
+        return NULL;
+
+    MultiByteToWideChar(CP_UTF8, 0, (LPCCH)content, -1, (LPWSTR)ansi, len);
+    len = WideCharToMultiByte(CP_ACP, 0, (LPCWCH)ansi, -1, NULL, 0, NULL, NULL);
+    WideCharToMultiByte(CP_ACP, 0, (LPCWCH)ansi, -1, dst, len, NULL, NULL);
+    dst[len] = '\0';
+    free(ansi);
+    return dst;
+}
+
+static JSModuleDef* js_module_loader_so(JSContext* ctx,
+                                        const char* module_name) {
     JS_ThrowReferenceError(ctx, "shared library modules are not supported yet");
     return NULL;
+    JSModuleDef* m;
+    JSInitModuleFunc* init_func;
+
+    char fileName[MAX_PATH] = { 0 };
+    char entryName[MAX_PATH] = { 0 };
+
+    char origin_module_name[MAX_PATH] = { 0 };
+    dynamic_u82a(module_name, origin_module_name);
+
+    dynamic_resolve(origin_module_name, ".\\libs\\", fileName, entryName);
+
+    HMODULE module = LoadLibraryA(fileName);
+    if (!module) {
+        JS_ThrowReferenceError(ctx, "could not load dynamic link library module filename '%s'", fileName);
+        return NULL;
+    }
+
+    init_func = (JSInitModuleFunc*)GetProcAddress(module, entryName);
+    if (!init_func) {
+        JS_ThrowReferenceError(ctx, "could not load module filename '%s', initialization function '%s' not found",
+                               fileName, entryName);
+        FreeLibrary(module);
+        return NULL;
+    }
+
+    m = init_func(ctx, module_name);
+    if (!m) {
+        JS_ThrowReferenceError(ctx, "could not load module filename '%s': initialization error",
+                               module_name);
+        FreeLibrary(module);
+        return NULL;
+    }
+    return m;
 }
 #else
 static JSModuleDef *js_module_loader_so(JSContext *ctx,
@@ -598,9 +718,7 @@ JSModuleDef *js_module_loader(JSContext *ctx,
 {
     JSModuleDef *m;
 
-    if (has_suffix(module_name, ".so")) {
-        m = js_module_loader_so(ctx, module_name);
-    } else {
+    if (has_suffix(module_name, ".js") || has_suffix(module_name, ".mjs")) {
         size_t buf_len;
         uint8_t *buf;
         JSValue func_val;
@@ -623,6 +741,8 @@ JSModuleDef *js_module_loader(JSContext *ctx,
         /* the module is already referenced, so we must free it */
         m = JS_VALUE_GET_PTR(func_val);
         JS_FreeValue(ctx, func_val);
+    } else {
+        m = js_module_loader_so(ctx, module_name);
     }
     return m;
 }
