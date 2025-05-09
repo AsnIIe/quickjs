@@ -153,58 +153,40 @@ static inline int64_t min_int64(int64_t a, int64_t b)
         return b;
 }
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(__clang__)
 /* WARNING: undefined if a = 0 */
 static inline int clz32(unsigned int a) {
-    unsigned long idx;
-    _BitScanReverse(&idx, a);
-    return 31 ^ idx;
+    unsigned long index;
+    _BitScanReverse(&index, a);
+    return 31 - index;
 }
 
 /* WARNING: undefined if a = 0 */
 static inline int clz64(uint64_t a) {
-    unsigned long where;
-    // BitScanReverse scans from MSB to LSB for first set bit.
-    // Returns 0 if no set bit is found.
-#if INTPTR_MAX >= INT64_MAX // 64-bit
-    if (_BitScanReverse64(&where, a))
-        return (int)(63 - where);
+#if INTPTR_MAX == INT64_MAX
+    unsigned long index;
+    BitScanReverse64(&index, a);
+    return 63 - index;
 #else
-  // Scan the high 32 bits.
-    if (_BitScanReverse(&where, (uint32_t)(a >> 32)))
-        return (int)(63 - (where + 32)); // Create a bit offset from the MSB.
-      // Scan the low 32 bits.
-    if (_BitScanReverse(&where, (uint32_t)(a)))
-        return (int)(63 - where);
+    if (a >> 32)
+        return clz32((unsigned)(a >> 32));
+    else
+        return clz32((unsigned)a) + 32;
 #endif
-    return 64; // Undefined Behavior.
 }
 
 /* WARNING: undefined if a = 0 */
 static inline int ctz32(unsigned int a) {
-    unsigned long idx;
-    _BitScanForward(&idx, a);
-    return 31 ^ idx;
+    unsigned long index;
+    _BitScanForward(&index, a);
+    return index;
 }
 
 /* WARNING: undefined if a = 0 */
 static inline int ctz64(uint64_t a) {
-    unsigned long where;
-    // Search from LSB to MSB for first set bit.
-    // Returns zero if no set bit is found.
-#if INTPTR_MAX >= INT64_MAX // 64-bit
-    if (_BitScanForward64(&where, a))
-        return (int)(where);
-#else
-  // Win32 doesn't have _BitScanForward64 so emulate it with two 32 bit calls.
-  // Scan the Low Word.
-    if (_BitScanForward(&where, (uint32_t)(a)))
-        return (int)(where);
-    // Scan the High Word.
-    if (_BitScanForward(&where, (uint32_t)(a >> 32)))
-        return (int)(where + 32); // Create a bit offset from the LSB.
-#endif
-    return 64;
+    unsigned long index;
+    BitScanForward64(&index, a);
+    return index;
 }
 
 #pragma pack(push, 1)
