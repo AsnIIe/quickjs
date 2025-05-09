@@ -574,8 +574,6 @@ static inline char* dynamic_u82a(const char* content, char* dst) {
 
 static JSModuleDef* js_module_loader_so(JSContext* ctx,
                                         const char* module_name) {
-    JS_ThrowReferenceError(ctx, "shared library modules are not supported yet");
-    return NULL;
     JSModuleDef* m;
     JSInitModuleFunc* init_func;
 
