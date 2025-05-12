@@ -110,7 +110,7 @@ typedef struct {
     JSValue func;
     JSValue this_val;
     int argc;
-    JSValue* argv;
+    JSValue argv[0];
 } JSOSTimer;
 
 typedef struct {
