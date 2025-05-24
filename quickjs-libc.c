@@ -2192,7 +2192,7 @@ static JSValue js_os_create_timer(JSContext* ctx, int64_t interval,
 {
     int timer_id = js_std_set_timer(ctx, func, JS_UNDEFINED, 0, NULL, interval, delay);
 
-    if (timer_id < 0)
+    if (!timer_id)
         return JS_EXCEPTION;
     return JS_NewInt32(ctx, timer_id);
 }
@@ -2296,18 +2296,24 @@ static JS_BOOL call_handler(JSContext *ctx, JSValueConst func, JSValueConst this
                             int argc, JSValueConst* argv)
 {
     JSValue ret, func1;
+    JS_BOOL success = TRUE;
+
+    JSRuntime* rt = JS_GetRuntime(ctx);
+    JSRuntimeStackSnapshot snapshot;
+    JS_StackSnapshot(rt, &snapshot);
+
     /* 'func' might be destroyed when calling itself (if it frees the
        handler), so must take extra care */
     func1 = JS_DupValue(ctx, func);
     ret = JS_Call(ctx, func1, this_val, argc, argv);
     JS_FreeValue(ctx, func1);
-    if (JS_IsException(ret))
-        js_std_dump_error(ctx);
     if (JS_IsException(ret)) {
-        return FALSE;
+        js_std_dump_error(ctx);
+        JS_RecoverySnapshot(rt, &snapshot);
+        success = FALSE;
     }
     JS_FreeValue(ctx, ret);
-    return TRUE;
+    return success;
 }
 
 #ifdef USE_WORKER

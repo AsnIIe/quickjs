@@ -113,6 +113,7 @@ JS_PrintValue
 JS_PrintValueRT
 JS_PrintValueSetDefaultOptions
 JS_ReadObject
+JS_RecoverySnapshot
 JS_ResolveModule
 JS_RunGC
 JS_SameValue
@@ -143,6 +144,7 @@ JS_SetRuntimeOpaque
 JS_SetStripInfo
 JS_SetSharedArrayBufferFunctions
 JS_SetUncatchableException
+JS_StackSnapshot
 JS_StrictEq
 JS_Throw
 JS_ThrowInternalError
