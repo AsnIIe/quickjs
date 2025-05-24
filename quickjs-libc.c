@@ -788,7 +788,10 @@ JSModuleDef *js_module_loader(JSContext *ctx,
 {
     JSModuleDef *m;
 
-    if (has_suffix(module_name, ".js") || has_suffix(module_name, ".mjs")) {
+    if (has_suffix(module_name, ".js") || 
+        has_suffix(module_name, ".mjs") || 
+        has_suffix(module_name, ".json") ||
+        js_module_test_json(ctx, attributes)) {
         size_t buf_len;
         uint8_t *buf;
 
