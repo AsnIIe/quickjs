@@ -197,6 +197,7 @@ js_realloc_rt
 js_std_add_helpers
 js_std_await
 js_std_await_timer
+js_std_clear_timer
 js_std_dump_error
 js_std_eval_binary
 js_std_free_handlers

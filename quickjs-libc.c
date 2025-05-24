@@ -2190,25 +2190,11 @@ static void free_timer(JSRuntime *rt, JSOSTimer *th)
 static JSValue js_os_create_timer(JSContext* ctx, int64_t interval,
                                   int64_t delay, JSValueConst func)
 {
-    JSRuntime* rt = JS_GetRuntime(ctx);
-    JSThreadState* ts = JS_GetRuntimeOpaque(rt);
-    JSOSTimer* th;
+    int timer_id = js_std_set_timer(ctx, func, JS_UNDEFINED, 0, NULL, interval, delay);
 
-    th = js_mallocz(ctx, sizeof(*th));
-    if (!th)
+    if (timer_id < 0)
         return JS_EXCEPTION;
-    th->timer_id = ts->next_timer_id;
-    if (ts->next_timer_id == INT32_MAX)
-        ts->next_timer_id = 1;
-    else
-        ts->next_timer_id++;
-    th->interval = interval;
-    th->timeout = get_time_ms() + delay;
-    th->func = JS_DupValue(ctx, func);
-    th->this_val = JS_UNDEFINED;
-    th->argc = 0;
-    list_add_tail(&th->link, &ts->os_timers);
-    return JS_NewInt32(ctx, th->timer_id);
+    return JS_NewInt32(ctx, timer_id);
 }
 
 static JSValue js_os_setTimeout(JSContext* ctx, JSValueConst this_val,
@@ -2261,6 +2247,9 @@ static JSValue js_os_clearTimeout(JSContext *ctx, JSValueConst this_val,
     JSThreadState *ts = JS_GetRuntimeOpaque(rt);
     JSOSTimer *th;
     int timer_id;
+
+    if (!ts)
+        return JS_UNDEFINED;
 
     if (JS_ToInt32(ctx, &timer_id, argv[0]))
         return JS_EXCEPTION;
@@ -4306,13 +4295,14 @@ JSValue js_std_await(JSContext *ctx, JSValue obj)
     return ret;
 }
 
-BOOL js_std_set_timer(JSContext* ctx, JSValue job_func, JSValueConst this_val,
-                     int argc, JSValueConst* argv, int64_t delay) 
+/* return timer_id, 0 if exception, > 0 if successfully. */
+int js_std_set_timer(JSContext* ctx, JSValue job_func, JSValueConst this_val,
+                     int argc, JSValueConst* argv, int64_t interval, int64_t delay)
 {
     argc = argv ? argc : 0;
 
     if (!JS_IsFunction(ctx, job_func))
-        return FALSE;
+        return 0;
 
     JSRuntime* rt = JS_GetRuntime(ctx);
     JSThreadState* ts = JS_GetRuntimeOpaque(rt);
@@ -4320,9 +4310,14 @@ BOOL js_std_set_timer(JSContext* ctx, JSValue job_func, JSValueConst this_val,
 
     th = js_mallocz(ctx, sizeof(*th) + argc * sizeof(JSValue));
     if (!th) {
-        return FALSE;
+        return 0;
     }
-    th->interval = 0;
+    th->timer_id = ts->next_timer_id;
+    if (ts->next_timer_id == INT32_MAX)
+        ts->next_timer_id = 1;
+    else
+        ts->next_timer_id++;
+    th->interval = interval;
     th->timeout = get_time_ms() + (delay >= 0 ? delay : 0);
     th->func = JS_DupValue(ctx, job_func);
     th->this_val = JS_DupValue(ctx, this_val);
@@ -4331,7 +4326,20 @@ BOOL js_std_set_timer(JSContext* ctx, JSValue job_func, JSValueConst this_val,
         th->argv[i] = JS_DupValue(ctx, argv[i]);
     }
     list_add_tail(&th->link, &ts->os_timers);
-    return TRUE;
+    return th->timer_id;
+}
+
+void js_std_clear_timer(JSRuntime* rt, int timer_id)
+{
+    JSThreadState* ts = JS_GetRuntimeOpaque(rt);
+    JSOSTimer* th;
+
+    if (!ts)
+        return;
+
+    th = find_timer_by_id(ts, timer_id);
+    if (th)
+        free_timer(rt, th);
 }
 
 /* execute pending timer jobs,
@@ -4343,7 +4351,7 @@ int js_std_await_timer(JSContext* ctx)
     if (os_poll_func)
         err = os_poll_func(ctx);
     else
-        return -3;
+        return -2;
     return err + 1;
 }
 
