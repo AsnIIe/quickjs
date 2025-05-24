@@ -34,3 +34,5 @@ run_sunspider_like
 /libs
 /build
 libwinpthread*.dll
+build/
+libs/

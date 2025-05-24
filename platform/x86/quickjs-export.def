@@ -14,7 +14,7 @@ JS_AddIntrinsicStringNormalize
 JS_AddIntrinsicTypedArrays
 JS_AddModuleExport
 JS_AddModuleExportList
-JS_AtomToCString
+JS_AtomToCStringLen
 JS_AtomToString
 JS_AtomToValue
 JS_Call
@@ -41,6 +41,7 @@ JS_FreeAtom
 JS_FreeAtomRT
 JS_FreeCString
 JS_FreeContext
+JS_FreePropertyEnum
 JS_FreeRuntime
 JS_GetAnyOpaque
 JS_GetArrayBuffer
@@ -52,6 +53,7 @@ JS_GetGlobalObject
 JS_GetImportMeta
 JS_GetModuleName
 JS_GetModuleNamespace
+JS_GetModulePrivateValue
 JS_GetOpaque
 JS_GetOpaque2
 JS_GetOwnProperty
@@ -132,6 +134,8 @@ JS_SetMemoryLimit
 JS_SetModuleExport
 JS_SetModuleExportList
 JS_SetModuleLoaderFunc
+JS_SetModuleLoaderFunc2
+JS_SetModulePrivateValue
 JS_SetOpaque
 JS_SetPropertyFunctionList
 JS_SetPropertyInt64
@@ -191,8 +195,10 @@ js_malloc_usable_size
 js_malloc_usable_size_rt
 js_mallocz
 js_mallocz_rt
+js_module_check_attributes
 js_module_loader
 js_module_set_import_meta
+js_module_test_json
 js_realloc
 js_realloc2
 js_realloc_rt
